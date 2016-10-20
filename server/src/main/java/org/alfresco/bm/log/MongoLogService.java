@@ -24,11 +24,11 @@ import org.alfresco.bm.test.LifecycleListener;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.BasicDBObjectBuilder;
-import com.mongodb.CommandFailureException;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
+import com.mongodb.MongoException;
 
 /**
  * Mongo implementation of service providing log message persistence
@@ -62,7 +62,7 @@ public class MongoLogService implements LifecycleListener, LogService
      * @param ttl           the time to live (seconds) of a log message or 0 to ignore.
      *                      This must be zero or less if the logs are capped by size or max entries.
      */
-    public MongoLogService(DB db, long size, int max, int ttl)
+    public MongoLogService(DB db, int size, int max, int ttl)
     {
         try
         {
@@ -77,23 +77,23 @@ public class MongoLogService implements LifecycleListener, LogService
                 }
                 if (ttl > 0)
                 {
-                    throw new IllegalArgumentException("The log collection can only be capped by size, max entries or time to live.");
+                    throw new IllegalArgumentException(
+                            "The log collection can only be capped by size, max entries or time to live.");
                 }
             }
             else if (max > 0L)
             {
-                throw new IllegalArgumentException("The logs must always be capped by size before capping by number.");
+                throw new IllegalArgumentException(
+                        "The logs must always be capped by size before capping by number.");
             }
             DBObject options = optionsBuilder.get();
             this.collection = db.createCollection(COLLECTION_LOGS, options);
         }
-        catch (CommandFailureException e)
+        catch (MongoException ex)
         {
-            // Double check
-            if (!db.collectionExists(COLLECTION_LOGS))
+            if (!db.getCollectionNames().contains(COLLECTION_LOGS))
             {
-                // The collection is not there so it was some other issue
-                throw e;
+                throw ex;
             }
             this.collection = db.getCollection(COLLECTION_LOGS);
         }

@@ -73,9 +73,13 @@ public class MongoFactoriesTest
             db.getCollectionNames();
             Assert.fail("DB must be closed.");
         }
-        catch (MongoSocketException e)
+        catch (IllegalStateException e)
         {
             // Expected
+        }
+		catch (MongoSocketException e)
+        {
+            // Expected before 3.2
         }
     }
     
@@ -215,7 +219,9 @@ public class MongoFactoriesTest
             {
                 MongoClient client = clientFactory.getObject();
                 String credentials = client.getCredentialsList().toString();
-                Assert.assertEquals("[MongoCredential{mechanism='MONGODB-CR', userName='ifa', source='admin', password=<hidden>, mechanismProperties={}}]", credentials);
+                // MongoDB 3.0 changed auth ...
+                //Assert.assertEquals("[MongoCredential{mechanism='MONGODB-CR', userName='ifa', source='admin', password=<hidden>, mechanismProperties={}}]", credentials);
+                Assert.assertTrue(credentials.endsWith("userName='ifa', source='admin', password=<hidden>, mechanismProperties={}}]"));
             }
             finally
             {
@@ -248,6 +254,19 @@ public class MongoFactoriesTest
             // Get the DB
             
             ctx.close();
+            
+            // avoid failing test because Threads are not aligned/synchronized
+            int count = 0;
+            while (threadCount != Thread.activeCount())
+            {
+                Thread.sleep(1000);
+                count ++;
+                if (count > 10 )
+                {
+                    // wait a max. of 10 seconds ... than fail test
+                    break; 
+                }
+            }
             Assert.assertEquals("Not all threads killed", threadCount, Thread.activeCount());
         }
         finally

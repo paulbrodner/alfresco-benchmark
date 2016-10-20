@@ -24,6 +24,7 @@ import java.util.Properties;
 import java.util.Set;
 
 import org.alfresco.bm.event.EventProcessor;
+import org.alfresco.bm.exception.ObjectNotFoundException;
 import org.alfresco.bm.log.LogService;
 import org.alfresco.bm.log.LogService.LogLevel;
 import org.alfresco.bm.server.EventController;
@@ -123,12 +124,17 @@ public class TestRun implements TestConstants
     }
     
     /**
-     * @return              the raw DBObject or <tt>null</tt> if the test run is no longer valid
+     * @return the raw DBObject or <tt>null</tt> if the test run is no longer
+     *         valid
      */
     private DBObject getRunObj(boolean includeProperties)
     {
-        DBObject runObj = testDAO.getTestRun(id, includeProperties);
-        if (runObj == null)
+        try
+        {
+            DBObject runObj = testDAO.getTestRun(id, includeProperties);
+            return runObj;
+        }
+        catch (ObjectNotFoundException e)
         {
             if (logger.isDebugEnabled())
             {
@@ -137,17 +143,13 @@ public class TestRun implements TestConstants
             stop();
             return null;
         }
-        else
-        {
-            return runObj;
-        }
     }
     
     /**
      * Get the application context associated with the test run.
      * 
      * @return              the application context or <tt>null</tt> if the application context
-     *                      has not been initialised or has already been shut down.
+     *                      has not been initialized or has already been shut down.
      */
     public synchronized ApplicationContext getCtx()
     {
@@ -206,6 +208,23 @@ public class TestRun implements TestConstants
                     if (testRunCtx == null)
                     {
                         // It failed to start.  Errors will have been reported.
+                        // now stop the test (otherwise it will restart again and again ...) - fkb 2015-11-10 
+                    	now = System.currentTimeMillis();
+                        boolean stopped = testDAO.updateTestRunState(
+                                id, version,
+                                TestRunState.STOPPED, now, now, now, null, 1L, 0.0D,
+                                0L, 0L);
+                        if (logger.isDebugEnabled())
+                        {
+                            if (stopped)
+                            {
+                                logger.debug("Successfully switched test run to " + TestRunState.STOPPED + ": " + id);
+                            }
+                            else 
+                            {
+                                logger.debug("Failed to transition test run to " + TestRunState.STOPPED + ": " + id);
+                            }
+                        }
                         return;
                     }
                     
@@ -223,16 +242,24 @@ public class TestRun implements TestConstants
                         // We bug out until the next check cycle
                         return;
                     }
+
                     // Lock in all properties
-                    runObj = getRunObj(false);
-                    if (runObj == null)
+                    try
                     {
-                        return;
+                        runObj = getRunObj(false);
+                        if (runObj == null)
+                        {
+                            return;
+                        }
+                        ObjectId testObjId = (ObjectId) runObj.get(FIELD_TEST);
+
+                        testDAO.lockProperties(testObjId, id);
                     }
-                    ObjectId testObjId = (ObjectId) runObj.get(FIELD_TEST);
-
-                    testDAO.lockProperties(testObjId, id);
-
+                    catch (ObjectNotFoundException onfe)
+                    {
+                        logger.error("Unable to find test or lock properties.", onfe);
+                    }
+                    
                     // Give the EventController the updated list of drivers
                     updateDriverIds();
 
@@ -469,6 +496,7 @@ public class TestRun implements TestConstants
         }
         catch (Exception e)
         {
+            /*
             Throwable root = ExceptionUtils.getRootCause(e);
             if (root != null && (root instanceof MongoException || root instanceof IOException))
             {
@@ -476,20 +504,20 @@ public class TestRun implements TestConstants
                 // FIXME 
                 
                 String msg1 = "Failed to start test run application '" + testRunFqn + "': " + e.getCause().getMessage();
-                String msg2 = "Set the test run property '" + PROP_MONGO_TEST_HOST + "' (<server>:<port>) as required.";
+                //String msg2 = "Set the test run property '" + PROP_MONGO_TEST_HOST + "' (<server>:<port>) as required.";
                 // We deal with this specifically as it's a simple case of not finding the MongoDB
                 logger.error(msg1);
-                logger.error(msg2);
+                //logger.error(msg2);
                 logService.log(driverId, test, run, LogLevel.ERROR, msg1);
-                logService.log(driverId, test, run, LogLevel.ERROR, msg2);
+                //logService.log(driverId, test, run, LogLevel.ERROR, msg2);
             }
             else
-            {
+            {*/
                 String stack = ExceptionUtils.getStackTrace(e);
                 logger.error("Failed to start test run application '" + testRunFqn + "': ", e);
                 String error = "Failed to start test run application '" + testRunFqn + ". \r\n" + stack;
                 logService.log(driverId, test, run, LogLevel.ERROR, error);
-            }
+            //}
             stop();
         }
     }

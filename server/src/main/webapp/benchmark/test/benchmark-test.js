@@ -7,12 +7,12 @@
     /**
      * Service layer to interact with Test API.
      */
-    angular.module('benchmark-test', ['ngResource','benchmark-run'])
+    var bmTest = angular.module('benchmark-test', ['ngResource','benchmark-run']);
 
     /**
      * Test Def Service.
      */
-    .factory('TestDefDetailService', function($resource) {
+    bmTest.factory('TestDefDetailService', function($resource) {
         return $resource('api/v1/test-defs/:name/:schema', {
             name: '@name',
             schema: '@schema'
@@ -26,9 +26,9 @@
                 }
             }
         })
-    }).value('version', '0.1')
+    }).value('version', '0.1');
 
-    .factory('TestDefService', function($resource) {
+    bmTest.factory('TestDefService', function($resource) {
         return $resource('api/v1/test-defs?:name', {
             name: '@name'
         }, {
@@ -48,12 +48,12 @@
                 isArray: true
             },
         })
-    }).value('version', '0.1')
+    }).value('version', '0.1');
 
     /**
      * Tests service.
      */
-    .factory('TestService', function($resource) {
+    bmTest.factory('TestService', function($resource) {
         return $resource("api/v1/tests/:id/:param", {
             id: '@id'
         }, {
@@ -92,24 +92,24 @@
                 }
             }
         })
-    }).value('version', '0.1')
+    }).value('version', '0.1');
 
     /**
      * Test properties service.
      */
-    .factory('TestPropertyService', function($resource) {
+    bmTest.factory('TestPropertyService', function($resource) {
         return $resource('api/v1/tests/:id/props/:propertyname', {
             id: '@id',
             propertyname: '@propertyname'
         }, {
-            update: {
+            'update': {
                 method: 'PUT',
                 params: {
                     id: 'id',
                     propertyname: 'propertyname'
                 }
             },
-            delete: {
+            'delete': {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json'
@@ -120,7 +120,7 @@
                 }
             }
         })
-    }).value('version', '0.1')
+    }).value('version', '0.1');
 
     
 
@@ -128,11 +128,25 @@
      * Test Controllers
      */
      //Controller to list tests, delete test and edit test.
-    .controller('ListTestsCtrl', ['$scope', '$location', '$timeout','TestService', 'ModalService',
+    bmTest.controller('ListTestsCtrl', ['$scope', '$location', '$timeout','TestService', 'ModalService',
         function($scope, $location, $timeout, TestService, ModalService) {
             // Instantiate an object to store your scope data in (Best Practices)
             $scope.data = {};
-
+            
+            // loads the number of drivers for the test
+            $scope.getNumDrivers = function(test){
+            	try{
+	            	TestService.getDrivers({
+	                    id: test.name
+	                }, function(response) {
+	                    test.driver = response.length + " Driver"; 
+	                });
+            	}
+            	catch(err){
+            		test.driver = "No Driver";
+            	}
+            }
+            
             // callback for ng-click 'deleteTest':
             $scope.deleteTest = function(testId) {
                 $scope.modal = {
@@ -146,26 +160,27 @@
                 }
                 $scope.modal = ModalService.create($scope.modal);
             }
-
+            
+            // callback from modal '$scope.deleteTest': delete test OK
             $scope.doDeleteTest = function(name) {
                 TestService.deleteTest({
                     id: name
                 }, function(response){
-                    $scope.data.tests = TestService.getTests()
+                    $scope.data.tests = TestService.getTests();
                 });
                 $scope.data.tests = TestService.getTests();
             }
-
+            
             $scope.data.tests = TestService.getTests();
         }
-    ])
+    ]);
 
 
     /**
      * Controller to display test detail
      */
-    .controller('TestPropertyCtrl', ['$scope', '$location', 'TestService', 'TestPropertyService', 'UtilService','ModalService',
-        function($scope, $location, TestService, TestPropertyService, UtilService, ModalService) {
+    bmTest.controller('TestPropertyCtrl', ['$scope', '$location', 'TestService', 'TestPropertyService', 'UtilService','ModalService', 'ValidationService',
+        function($scope, $location, TestService, TestPropertyService, UtilService, ModalService, ValidationService) {
             $scope.data = {};
             $scope.properties = [];
             $scope.master = {};
@@ -174,6 +189,7 @@
             $scope.attentionRequired=false;
             var myname = $location.path().split('/');
             var testname = myname[2];
+            $scope.nameErrorMessage = null;
 
             TestService.getDrivers({
                 id: testname
@@ -220,15 +236,18 @@
 
             //callback for ng-click 'renameTest'
             $scope.renameTest = function(name) {
-                var postData = {
-                    "oldName": testname,
-                    "name": name,
-                    "version": $scope.data.test.version,
-                    "description": $scope.data.test.description,
-                    "release": $scope.data.test.release,
-                    "schema": $scope.data.test.schema
-                };
-                $scope.updateTest(postData);
+                // V2.1: only call back-end if name was altered ...
+                if (name != testname){
+                    var postData = {
+                        "oldName": testname,
+                        "name": name,
+                        "version": $scope.data.test.version,
+                        "description": $scope.data.test.description,
+                        "release": $scope.data.test.release,
+                        "schema": $scope.data.test.schema
+                    };
+                    $scope.updateTest(postData);
+                }
             }
 
             //callback for ng-click 'updateTestDesc':
@@ -244,6 +263,9 @@
                     "schema": $scope.data.test.schema
                 };
                 $scope.updateTest(postData);
+                // increase version number for there will be no reload of page on update
+                // of the version number ... else next save will fail ...
+                $scope.data.test.version = $scope.data.test.version + 1;
             }
 
             //callback for ng-click 'updateTestSchema':
@@ -263,8 +285,12 @@
 
             //Updates the test and redirects to new page
             $scope.updateTest = function(postData) {
-                TestService.updateTest({}, postData, function(res) {});
-                $location.path("/tests/" + postData.name + "/properties");
+                var result = TestService.updateTest({}, postData, function(res) {});
+                // V2.1 only update location if name was altered
+                if (result.name != result.oldName){
+                    $location.path("/tests/" + postData.name + "/properties");
+                }
+                return result;
             }
 
             //-------------- Test properties crud ----------
@@ -276,9 +302,7 @@
                 };
                 $scope.updateTestProperty(testname, item, propData);
                 item.version = item.version + 1; 
-                // this doesn't work! 2015-10-09: has to be investigated for 2.0.11
-                //var scope = $scope.data.properties;
-                //$compile(content.contents(scope));
+                // TODO - check if update was successful and update UI if not
             }
 
             $scope.cancelEdit = function(item) {
@@ -297,7 +321,7 @@
             
             // checks whether value is empty or not
             $scope.isEmpty = function(value){
-                if (typeof value == undefined){
+                if (typeof value == 'undefined'){
                     return true;
                 }
                 if (value == null){
@@ -336,6 +360,81 @@
                 }
                 return true;
             }
+            
+            // called for each key press  in the BM name editor:
+            // returns true if to continue edit
+            // returns false if edit is done. 
+            $scope.doKeyPressName = function(event){
+                if (event.keyCode == 13){
+                    // ENTER - allowed only if no validation error message is present
+                    if (null == $scope.nameErrorMessage){
+                        $scope.renameTest($scope.data.test.name);
+                        return false;
+                    }
+                }
+                else if (event.keyCode == 27){
+                    // ESC
+                    $scope.cancelRename();
+                    return false;
+                }
+                return true;
+            }
+            
+            // called for each key press  in the BM test description editor:
+            // returns true if to continue edit
+            // returns false if edit is done. 
+            $scope.doKeyPressDesc = function(event){
+                if (event.keyCode == 13){
+                    // ENTER
+                    $scope.updateTestDesc($scope.data.test.description);
+                    return false;
+                }
+                else if (event.keyCode == 27){
+                    // ESC
+                    $scope.cancelDesc();
+                    return false;
+                }
+                return true;
+            }
+            
+            // Validates the name entered by the user
+            $scope.validateName = function(){
+                $scope.nameErrorMessage = ValidationService.isValidTestName($scope.data.test.name);
+            }
+            
+            // validates the property
+            $scope.validate = function(itemProperty){
+                ValidationService.validate(itemProperty);
+            }
+            
+         // checks whether the property item has a choice collection
+            $scope.hasChoice = function(itemProperty){
+                if (itemProperty.type.toLowerCase() == 'boolean'){
+                    // a boolean value has implicit 'true' and 'false' only ...
+                    return true;
+                }
+                    
+                if (typeof itemProperty.choice != 'undefined'){
+                    if(JSON.parse(itemProperty.choice).length > 0){
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            // returns the choice collection of a property item or null 
+            $scope.getChoiceCollection = function(itemProperty){
+                // check boolean first ...
+                if (itemProperty.type.toLowerCase() == 'boolean'){
+                    var choices= ["true", "false"];
+                    return choices; 
+                }
+                if (typeof itemProperty.choice != 'undefined'){
+                    return JSON.parse(itemProperty.choice);
+                }
+                return null;
+            }
+            
             $scope.updateTestProperty = function(testname, item, propData) {
                 TestPropertyService.update({
                         "id": testname,
@@ -404,17 +503,18 @@
             }
             
         }
-    ])
+    ]);
 
     /**
      * Controller to create test detail
      */
-    .controller('TestCreateCtrl', ['$scope', '$location', 'TestService', 'TestDefService',
-        function($scope, $location, TestService, TestDefService) {
+    bmTest.controller('TestCreateCtrl', ['$scope', '$location', 'TestService', 'TestDefService', 'ValidationService',
+        function($scope, $location, TestService, TestDefService, ValidationService) {
             $scope.master = {};
             $scope.defs = {};
             $scope.nodefs = false;
             $scope.showActiveTests = true;
+            $scope.errorMsg = null;
             
             $scope.showActiveTestDefs = function(value) {
                 if (value == true) {
@@ -457,6 +557,11 @@
                 };
             };
 
+            // validates the test name
+            $scope.validateName = function(testName){
+                $scope.errorMsg = ValidationService.isValidTestName(testName);
+            };
+            
             $scope.update = function(test) {
                 $scope.master = angular.copy(test);
             };
@@ -484,12 +589,12 @@
                         if (res.name === postData.name) {
                             $location.path("/tests/" + res.name + "/properties");
                         }
-                    }, function error(error) {
+                    }, function error(errorVal) {
                         $scope.hasError = true;
-                        if (error.status == 500) {
+                        if (errorVal.status == 500) {
                             $scope.errorMsg = "The name already exists, please choose another unique name.";
                         } else {
-                            $scope.errorMsg = error.data.error;
+                            $scope.errorMsg = errorVal.data.error;
                         }
 
                     });
@@ -501,12 +606,12 @@
             $scope.showActiveTestDefs(true);
             $scope.reset();
         }
-    ])
+    ]);
 
     /**
-     * Controller to list test defs.
+     * Controller to list test definitions.
      */
-    .controller('TestDefListCtrl', ['$scope', 'TestDefService',
+    bmTest.controller('TestDefListCtrl', ['$scope', 'TestDefService',
         function($scope, TestDefService) {
             // Instantiate an object to store your scope data in (Best Practices)
             $scope.data = {};
@@ -514,11 +619,12 @@
                 $scope.data.tests = response;
             });
         }
-    ])
+    ]);
+    
     /**
-     * Controler to display test def detail.
+     * Controller to display test definition detail.
      */
-    .controller('TestDefDetailCtrl', ['$scope', '$location', 'TestDefDetailService',
+    bmTest.controller('TestDefDetailCtrl', ['$scope', '$location', 'TestDefDetailService',
         function($scope, $location, TestDefDetailService) {
             $scope.data = {};
             var path = $location.path();
@@ -531,13 +637,13 @@
                 $scope.data.item = response;
             });
         }
-    ])
+    ]);
     
     /*
      * Copy test form controller
      */
-    .controller('TestCopyCtrl', ['$scope', '$location', 'TestService', 'TestDefService',
-        function($scope, $location, TestService, TestDefService) {
+    bmTest.controller('TestCopyCtrl', ['$scope', '$location', 'TestService', 'TestDefService', 'ValidationService',
+        function($scope, $location, TestService, TestDefService, ValidationService) {
             $scope.testname = $location.path().split('/')[2];
             TestService.getTest({
                 id: $scope.testname
@@ -548,6 +654,7 @@
             $scope.defs = {};
             $scope.nodefs = false;
             $scope.showActiveTests = true;
+            $scope.errorMsg = null;
             
             $scope.showActiveTestDefs = function(value) {
                 if (value == true) {
@@ -591,6 +698,11 @@
             };
             $scope.showActiveTestDefs(true);
 
+            // validation of user entries
+            $scope.validateName = function(runName){
+                $scope.errorMsg = ValidationService.isValidTestName(runName);
+            }
+            
             $scope.update = function(test) {
                 $scope.master = angular.copy(test);
             };
@@ -628,12 +740,12 @@
                         if (res.name === postData.name) {
                             $location.path("/tests/" + res.name + "/properties");
                         }
-                    }, function error(error) {
+                    }, function error(errorVal) {
                         $scope.hasError = true;
-                        if (error.status == 500) {
+                        if (errorVal.status == 500) {
                             $scope.errorMsg = "The name already exists, please choose another unique name.";
                         } else {
-                            $scope.errorMsg = error.data.error;
+                            $scope.errorMsg = errorVal.data.error;
                         }
                     });
                 } else {
@@ -645,14 +757,14 @@
                         $scope.response = res;
                         $location.path("/tests/" + res.name);
                     },
-                    function error(error) {
+                    function error(errorVal) {
                         $scope.hasError = true;
-                        if (error.status == 500) {
+                        if (errorVal.status == 500) {
                             $scope.errorMsg = "The name already exists, please choose another unique name.";
                         } else {
-                            $scope.errorMsg = error.data.error;
+                            $scope.errorMsg = errorVal.data.error;
                         }
-                        $scope.errorMsg = error.data.error;
+                        $scope.errorMsg = errorVal.data.error;
                     });
             };
         }

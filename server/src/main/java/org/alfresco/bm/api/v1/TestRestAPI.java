@@ -39,6 +39,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response.Status;
 
 import org.alfresco.bm.api.AbstractRestResource;
+import org.alfresco.bm.exception.ObjectNotFoundException;
 import org.alfresco.bm.log.LogService;
 import org.alfresco.bm.log.LogService.LogLevel;
 import org.alfresco.bm.report.DataReportService;
@@ -52,6 +53,8 @@ import org.alfresco.bm.test.mongo.MongoTestDAO;
 import org.alfresco.mongo.MongoClientFactory;
 import org.alfresco.mongo.MongoDBFactory;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
@@ -65,15 +68,16 @@ import com.mongodb.util.JSON;
 /**
  * <b>REST API V1</b><br/>
  * <p>
- * The url pattern:
+ * The URL pattern:
  *     <ul>
  *         <li>&lt;API URL&gt;/v1/tests</pre></li>
  *     </ul>
  * </p>
- * Delegate the request to service layer and responds with json.
+ * Delegate the request to service layer and responds with JSON.
  * 
  * @author Michael Suzuki
  * @author Derek Hulley
+ * @author Frank Becker
  * @since 2.0
  */
 @Path("/v1/tests")
@@ -198,7 +202,7 @@ public class TestRestAPI extends AbstractRestResource
         if (!copy)
         {
             // Get the definition and make sure that we have details to play with
-            // Note that it will throw an exception if the defintion does not exist
+            // Note that it will throw an exception if the definition does not exist
             DBObject testDefObj = testDAO.getTestDef(release, schema);
             if (testDefObj == null)
             {
@@ -404,6 +408,7 @@ public class TestRestAPI extends AbstractRestResource
      * 
      * @param test              the name of the test
      * @param clean             <tt>true</tt> to remove all related test runs as well
+     * 
      */
     @DELETE
     @Path("/{test}")
@@ -429,7 +434,7 @@ public class TestRestAPI extends AbstractRestResource
                 // Delete each one, in turn, which will clean up associated collections and data
                 for (String run : runs)
                 {
-                    deleteTestRun(test, run, clean);
+                    deleteTestRun(test, run, true);
                 }
             }
             // Delete the test configuration
@@ -785,7 +790,7 @@ public class TestRestAPI extends AbstractRestResource
         }
         
         // Get the definition and make sure that we have details to play with
-        // Note that it will throw an exception if the defintion does not exist
+        // Note that it will throw an exception if the definition does not exist
         DBObject testObj = testDAO.getTest(test, false);
         if (testObj == null)
         {
@@ -823,7 +828,15 @@ public class TestRestAPI extends AbstractRestResource
                 written = testDAO.copyTestRun(test, name, copyOf, version);
                 if (!written)
                 {
-                    DBObject copyOfObj = testDAO.getTestRun(test, copyOf, false);
+                    DBObject copyOfObj;
+                    try
+                    {
+                        copyOfObj = testDAO.getTestRun(test, copyOf, false);
+                    }
+                    catch (ObjectNotFoundException onfe)
+                    {
+                        copyOfObj = null;
+                    }
                     Integer copyOfVersion = copyOfObj == null ? null : (Integer) copyOfObj.get(FIELD_VERSION);
                     if (copyOfVersion != null && copyOfVersion.equals(version))
                     {
@@ -849,8 +862,12 @@ public class TestRestAPI extends AbstractRestResource
                 }
             }
             // Now fetch the full run definition
-            DBObject dbObject = testDAO.getTestRun(test, name, true);
-            if (dbObject == null)
+            DBObject dbObject;
+            try
+            {
+                dbObject = testDAO.getTestRun(test, name, true);
+            }
+            catch (ObjectNotFoundException onfe)
             {
                 throwAndLogException(Status.NOT_FOUND, "The newly create run '" + name + "' could not be found.");
                 return null;
@@ -892,8 +909,12 @@ public class TestRestAPI extends AbstractRestResource
         }
         try
         {
-            DBObject dbObject = testDAO.getTestRun(test, run, true);
-            if (dbObject == null)
+            DBObject dbObject = null;
+            try
+            {
+                dbObject = testDAO.getTestRun(test, run, true);
+            }
+            catch (ObjectNotFoundException onfe)
             {
                 throwAndLogException(Status.NOT_FOUND, "The test run '" + test + "." + run + "' does not exist.");
             }
@@ -944,13 +965,13 @@ public class TestRestAPI extends AbstractRestResource
         if (test == null || test.length() == 0)
         {
             throwAndLogException(Status.BAD_REQUEST, "No test name supplied.");
-            return null;
         }
         
+        /* Dead code ... version can never be null: testRunDetails.getVersion() returns int
         if (version == null)
         {
             throwAndLogException(Status.BAD_REQUEST, "A 'version' must be supplied to update a test run.");
-        }
+        }*/
         if (oldName == null)
         {
             throwAndLogException(Status.BAD_REQUEST, "Test run 'oldName' must be supplied.");
@@ -975,12 +996,17 @@ public class TestRestAPI extends AbstractRestResource
             {
                 throwAndLogException(Status.NOT_FOUND, "Could not update test run '" + test + "." + oldName + "'.");
             }
+
             // Now fetch the full test run
-            DBObject dbObject = testDAO.getTestRun(test, name, true);
-            if (dbObject == null)
+            DBObject dbObject = null;
+            try
             {
-                throwAndLogException(Status.NOT_FOUND, "The test for test run '" + test + "." + name + "' could not be found.");
-                return null;
+                dbObject = testDAO.getTestRun(test, name, true);
+            }
+            catch (ObjectNotFoundException onfe)
+            {
+                throwAndLogException(Status.NOT_FOUND,
+                        "The test for test run '" + test + "." + name + "' could not be found.");
             }
             String json = JSON.serialize(dbObject);
             if (logger.isDebugEnabled())
@@ -1006,6 +1032,7 @@ public class TestRestAPI extends AbstractRestResource
      * @param test              the name of the test
      * @param run               the name of the test run
      * @param clean             <tt>true</tt> to remove all related test run data as well
+     * 
      */
     @DELETE
     @Path("/{test}/runs/{run}")
@@ -1025,65 +1052,31 @@ public class TestRestAPI extends AbstractRestResource
         }
         try
         {
-            // Delete all the associated test run data
+            // delete the test run data
             if (clean)
             {
-                // Get the MongoDB connection properties for the test run
-                String mongoTestHost = getTestRunPropertyString(test, run, PROP_MONGO_TEST_HOST);
-                String mongoTestDB = getTestRunPropertyString(test, run, PROP_MONGO_TEST_DATABASE);
-                String mongoTestUsername = getTestRunPropertyString(test, run, PROP_MONGO_TEST_USERNAME);
-                String mongoTestPassword = getTestRunPropertyString(test, run, PROP_MONGO_TEST_PASSWORD);
-                MongoClient mongoClient = null;
-                try
+                if (null != this.testRunServices)
                 {
-                    // remove extra data (first always)
-                    if (null != this.testRunServices)
-                    {
-                        DataReportService dataReportService = this.testRunServices.getDataReportService(test, run);
-                        if (null != dataReportService)
-                        {
-                            dataReportService.remove(null, test, run);
-                        }
-                    }
-                    
-                    // clean up test run
-                    mongoClient = new MongoClientFactory(new MongoClientURI(MONGO_PREFIX + mongoTestHost), mongoTestUsername, mongoTestPassword).getObject();
-                    DB mongoDB = new MongoDBFactory(mongoClient, mongoTestDB).getObject();
-                    Set<String> testRunCollections = mongoDB.getCollectionNames();
-                    // Drop all that match the test and test run
-                    for (String testRunCollection : testRunCollections)
-                    {
-                        if (!testRunCollection.startsWith(test + "." + run + "."))
-                        {
-                            continue;               // Keep looking
-                        }
-                        DBCollection collection = mongoDB.getCollection(testRunCollection);
-                        if (collection == null)
-                        {
-                            continue;               // Already removed
-                        }
-                        collection.drop();
-                    }
+                    this.testRunServices.deleteTestRun(test, run);
                 }
-                catch (IllegalArgumentException e)
+                else
                 {
-                    // This is valid if MongoDB host was not set
-                    logService.log(null, test, run, LogLevel.WARN, "Unable to clean test run '" + run + "' in test '" + test + "': " + e.getMessage());
+                    // clean must always be true ...
+                    throwAndLogException(Status.NOT_FOUND,
+                            "The test run data collections '" + test + "."
+                                    + run + "' were not deleted.");
                 }
-                catch (MongoTimeoutException e)
-                {
-                    // This is valid if the test run does not reference a valid MongoDB host
-                    logService.log(null, test, run, LogLevel.WARN, "Unable to clean test run '" + run + "' in test '" + test + "'; MongoDB connection timed out: " + mongoTestHost);
-                }
-                finally
-                {
-                    if (mongoClient != null)
-                    {
-                        try {mongoClient.close(); } catch (Exception e) { logger.error(e); }
-                    }
-                }
-                
             }
+            else
+            {
+                logger.warn(
+                        "Test run data of test '" 
+                                + test 
+                                + "', run '" 
+                                + run
+                                + "' not removed!");
+            }
+
             // Delete the test run and all associated configuration
             boolean deleted = testDAO.deleteTestRun(test, run);
             if (!deleted)
@@ -1245,10 +1238,19 @@ public class TestRestAPI extends AbstractRestResource
         }
         catch (IllegalStateException e)
         {
-            DBObject runObj = testDAO.getTestRun(test, run, false);
+            String msg = test + "." + run;
+            try
+            {
+                DBObject runObj = testDAO.getTestRun(test, run, false);
+                msg = runObj.toString();
+            }
+            catch (ObjectNotFoundException e1)
+            {
+                logger.debug("Test '" + test + "', run '" + run +"' not found!", e1);
+            }
             throwAndLogException(
                     Status.FORBIDDEN,
-                    "Properties cannot be changed once a test has started: " + runObj);
+                    "Properties cannot be changed once a test has started: " + msg);
         }
         
         // Retrieve the property
@@ -1279,8 +1281,12 @@ public class TestRestAPI extends AbstractRestResource
         }
         try
         {
-            DBObject dbObject = testDAO.getTestRun(test, run, false);
-            if (dbObject == null)
+            DBObject dbObject = null;
+            try
+            {
+                dbObject = testDAO.getTestRun(test, run, false);
+            }
+            catch (ObjectNotFoundException onfe)
             {
                 throwAndLogException(Status.NOT_FOUND, "The test run '" + test + "." + run + "' does not exist.");
             }
@@ -1474,5 +1480,89 @@ public class TestRestAPI extends AbstractRestResource
             @PathParam("run") String run)
     {
         return new ResultsRestAPI(testRunServices, test, run);
+    }
+    
+    @GET
+    @Path("/{test}/runs/{run}/exportProps")
+    @Produces(MediaType.APPLICATION_JSON)
+    public String exportProps(
+            @PathParam("test") String test,
+            @PathParam("run") String run)
+    {
+        if (logger.isDebugEnabled())
+        {
+            logger.debug(
+                    "Inbound: " +
+                    "[test:" + test +
+                    ", run:" + run +
+                    "]");
+        }
+        try
+        {
+            DBObject dbObject = testDAO.exportTestRun(test, run);
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            String json = gson.toJson(dbObject);
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("Outbound: " + json);
+            }
+            return json;
+        }
+        catch (WebApplicationException e)
+        {
+            throw e;
+        }
+        catch (ObjectNotFoundException onfe)
+        {
+            throwAndLogException(Status.NOT_FOUND, "The test run '" + test + "." + run + "' does not exist.");
+        }
+        catch (Exception e)
+        {
+            throwAndLogException(Status.INTERNAL_SERVER_ERROR, e);
+        }
+        
+        return null;
+    }
+    
+    @POST
+    @Path("/{test}/runs/{run}/importProps")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public String importProps(
+            @PathParam("test") String test,
+            @PathParam("run") String run,
+            PropSetBean propBean)
+    {
+        if (logger.isDebugEnabled())
+        {
+            logger.debug(
+                    "Inbound: " +
+                            "[test:" + test +
+                            ", run:" + run +
+                            "]");
+        }
+        try
+        {
+            DBObject dbImportObject = (DBObject)JSON.parse(propBean.getValue());
+            DBObject dbObject = testDAO.importTestRun(test, run, dbImportObject);
+
+            String json = JSON.serialize(dbObject);
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("Outbound: " + json);
+            }
+            return json;
+        }
+        catch (WebApplicationException e)
+        {
+            throw e;
+        }
+        catch (Exception e)
+        {
+            throwAndLogException(Status.INTERNAL_SERVER_ERROR, e);
+        }
+
+        return null;
     }
 }

@@ -7,18 +7,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Date;
 
-import org.alfresco.bm.log.TestRunLogService;
 import org.alfresco.bm.test.LifecycleListener;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
-import com.mongodb.BasicDBObject;
 import com.mongodb.BasicDBObjectBuilder;
-import com.mongodb.CommandFailureException;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
+import com.mongodb.MongoCommandException;
 
 /**
  * extra data report service
@@ -67,7 +65,7 @@ public class DataReportServiceImpl implements LifecycleListener, DataReportServi
             this.collectionExtraData = db.createCollection(COLLECTION_EXTRA_DATA, null);
             this.collectionDescription = db.createCollection(COLLECTION_EXTRA_DATA_DESCRIPTION, null);
         }
-        catch (CommandFailureException e)
+        catch (MongoCommandException e)
         {
             // try to get collection anyway - if not there, re-throw
             if (!db.collectionExists(COLLECTION_EXTRA_DATA) || !db.collectionExists(COLLECTION_EXTRA_DATA_DESCRIPTION))
@@ -334,10 +332,6 @@ public class DataReportServiceImpl implements LifecycleListener, DataReportServi
         
         // sort and return cursor
         DBCursor dbCursor = this.collectionExtraData.find(queryObj);
-        /** should not be necessary because index was changed to be ASC 
-         * TODO test!
-        dbCursor.sort(new BasicDBObject(FIELD_TIME, 1));        
-        */
         
         return dbCursor;
     }

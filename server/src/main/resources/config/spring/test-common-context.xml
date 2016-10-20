@@ -28,16 +28,28 @@
         </constructor-arg>
     </bean>
     
-    <!--                 -->
-    <!-- Logging         -->
-    <!--                 -->
+    <!--                            -->
+    <!-- Logging and Data Results   -->
+    <!--                            -->
 
+    <bean id="testRunService" class="org.alfresco.bm.test.TestRunService">
+        <constructor-arg name="logService" ref="logService" />
+        <constructor-arg name="testDAO" ref="testDAO" />
+        <constructor-arg name="driverId" value="${driverId}" />
+        <constructor-arg name="testName" value="${test}" />
+        <constructor-arg name="testRunName" value="${testRun}" />
+    </bean>
+
+    <!-- DEPRECATED from 2.1.2 on! Please use testRunService instead -->
     <bean id="testRunLogService" class="org.alfresco.bm.log.TestRunLogService">
         <constructor-arg name="logService" ref="logService" />
         <constructor-arg name="driverId" value="${driverId}" />
         <constructor-arg name="test" value="${test}" />
         <constructor-arg name="testRun" value="${testRun}" />
     </bean>
+
+    
+    
 
     <!--                 -->
     <!-- Reporting       -->

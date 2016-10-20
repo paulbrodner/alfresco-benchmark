@@ -31,9 +31,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.alfresco.bm.event.EventService;
 import org.alfresco.bm.event.ResultService;
+import org.alfresco.bm.exception.ObjectNotFoundException;
 import org.alfresco.bm.report.DataReportService;
 import org.alfresco.bm.session.SessionService;
 import org.alfresco.bm.test.mongo.MongoTestDAO;
+import org.alfresco.bm.util.ArgumentCheck;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -43,7 +45,10 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertiesPropertySource;
 
 import com.mongodb.BasicDBList;
+import com.mongodb.DB;
+import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
+import com.mongodb.MongoException;
 import com.mongodb.MongoSocketException;
 
 /**
@@ -105,11 +110,17 @@ public class TestRunServicesCache implements LifecycleListener, TestConstants
     private ClassPathXmlApplicationContext createContext(String test, String run)
     {
         String testRunFqn = test + "." + run;
-        DBObject runObj = dao.getTestRun(test, run, true);
-        if (runObj == null)
+        DBObject runObj;
+        try
         {
+            runObj = dao.getTestRun(test, run, true);
+        }
+        catch (ObjectNotFoundException e1)
+        {
+            logger.error("Test '" + test + "." + run + "' not found.", e1);
             return null;
         }
+        
         // Dig the properties out of the test run
         Properties testRunProps = new Properties();
         {
@@ -310,6 +321,9 @@ public class TestRunServicesCache implements LifecycleListener, TestConstants
      */
     public DataReportService getDataReportService(String test, String run)
     {
+        ArgumentCheck.checkMandatoryString(test, "test");
+        ArgumentCheck.checkMandatoryString(run, "run");
+
         try
         {
             ApplicationContext ctx = getContext(test, run);
@@ -323,6 +337,51 @@ public class TestRunServicesCache implements LifecycleListener, TestConstants
             logger.debug("No data report service available!", e);
         }
         return null;
+    }
+    
+    /**
+     * Deletes the collections of the test run and the extra data from MongoDB
+     * 
+     * @param test
+     *        (String, mandatory) test name
+     * @param run
+     *        (String, mandatory) test run name
+     * 
+     * @since 2.1.4
+     */
+    public boolean deleteTestRun(String test, String run)
+    {
+        boolean removed = true;
+
+        // remove the test run from the data service
+        DataReportService dataReportService = getDataReportService(test, run);
+        if (null != dataReportService)
+        {
+            dataReportService.remove(null, test, run);
+            if (logger.isDebugEnabled())
+            {
+                logger.debug("Removed " + test + "." + run + " data from 'DataReportService'.");
+            }
+        }
+
+        // remove all collections
+        EventService ev = getEventService(test, run);
+        if (null != ev)
+        {
+            removed &= ev.clear();
+        }
+        ResultService rs = getResultService(test, run);
+        if (null != rs)
+        {
+            removed &= rs.clear();
+        }
+        SessionService se = getSessionService(test, run);
+        if (null != se)
+        {
+            removed &= se.clear();
+        }
+
+        return removed;
     }
 
     /**

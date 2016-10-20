@@ -27,19 +27,17 @@ import org.alfresco.bm.api.v1.EventResultFilter;
 import org.alfresco.bm.event.AbstractResultService;
 import org.alfresco.bm.event.Event;
 import org.alfresco.bm.event.EventRecord;
-import org.alfresco.bm.event.EventResult;
-import org.alfresco.bm.report.DataReportService;
 import org.alfresco.bm.test.LifecycleListener;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.BasicDBObjectBuilder;
-import com.mongodb.CommandFailureException;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.QueryBuilder;
 
@@ -66,7 +64,7 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
             this.collection = db.createCollection(collection, new BasicDBObject());
             checkIndexes = true;
         }
-        catch (CommandFailureException e)
+        catch (MongoCommandException e)
         {
             if (!db.collectionExists(collection))
             {
@@ -191,9 +189,8 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
         String driverId = (String) eventRecordObj.get(EventRecord.FIELD_DRIVER_ID);
         if (driverId == null)
         {
-            // For backward compatibility, check the old field name
-            // TODO: Remove after August 2015
-            driverId = (String) eventRecordObj.get("serverId");
+           // data model is too old
+            throw new IllegalArgumentException("DBObject for EventRecord doesn't contain a driver ID. The data model may be too old!");
         }
         boolean success = eventRecordObj.containsField(EventRecord.FIELD_SUCCESS) ?
                 (Boolean) eventRecordObj.get(EventRecord.FIELD_SUCCESS) :
@@ -297,9 +294,6 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
                 .add(EventRecord.FIELD_CHART, result.isChart())
                 .add(EventRecord.FIELD_DATA, result.getData())
                 .add(EventRecord.FIELD_DRIVER_ID, result.getDriverId())
-                // Write the old 'serverId' field so that older servers can access the results
-                // TODO: Remove after August 2015
-                .add("serverId", result.getDriverId())
                 .add(EventRecord.FIELD_START_DELAY, result.getStartDelay())
                 .add(EventRecord.FIELD_START_TIME, new Date(result.getStartTime()))
                 .add(EventRecord.FIELD_SUCCESS, result.isSuccess())
@@ -392,14 +386,19 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
         // Get all the results and convert them
         int size = cursor.size();
         List<EventRecord> results = new ArrayList<EventRecord>(size);
-        while (cursor.hasNext())
+        try
         {
-            DBObject obj = cursor.next();
-            EventRecord eventRecord = convertToEventRecord(obj);
-            results.add(eventRecord);
+            while (cursor.hasNext())
+            {
+                DBObject obj = cursor.next();
+                EventRecord eventRecord = convertToEventRecord(obj);
+                results.add(eventRecord);
+            }
         }
-        cursor.close();
-        
+        finally
+        {
+            cursor.close();
+        }
         // Done
         if (logger.isDebugEnabled())
         {
@@ -442,14 +441,19 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
         // Get all the results and convert them
         int size = cursor.size();
         List<EventRecord> results = new ArrayList<EventRecord>(size);
-        while (cursor.hasNext())
+        try
         {
-            DBObject obj = cursor.next();
-            EventRecord eventRecord = convertToEventRecord(obj);
-            results.add(eventRecord);
+            while (cursor.hasNext())
+            {
+                DBObject obj = cursor.next();
+                EventRecord eventRecord = convertToEventRecord(obj);
+                results.add(eventRecord);
+            }
         }
-        cursor.close();
-        
+        finally
+        {
+            cursor.close();
+        }
         // Done
         if (logger.isDebugEnabled())
         {
@@ -585,14 +589,35 @@ public class MongoResultService extends AbstractResultService implements Lifecyc
         // Get all the results and convert them
         int size = cursor.size();
         List<EventDetails> results = new ArrayList<EventDetails>(size);
-        while (cursor.hasNext())
+        try
         {
-            DBObject obj = cursor.next();
-            EventDetails eventDetails = convertToEventDetails(obj);
-            results.add(eventDetails);
+            while (cursor.hasNext())
+            {
+                DBObject obj = cursor.next();
+                EventDetails eventDetails = convertToEventDetails(obj);
+                results.add(eventDetails);
+            }
         }
-        cursor.close();
+        finally
+        {
+            cursor.close();
+        }
         
         return results;
+    }
+    
+    @Override
+    public boolean clear()
+    {
+        try
+        {
+            this.collection.drop();
+            return true;
+        }
+        catch(MongoException mex)
+        {
+            logger.error("Unable to drop colection '" + this.collection.getName() + "'");
+            return false;
+        }
     }
 }

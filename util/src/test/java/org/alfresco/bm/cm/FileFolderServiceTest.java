@@ -36,7 +36,7 @@ import org.junit.runners.JUnit4;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
-import com.mongodb.MongoException.DuplicateKey;
+import com.mongodb.DuplicateKeyException;
 
 /**
  * @see FileFolderService
@@ -69,15 +69,35 @@ public class FileFolderServiceTest
         mongoFactory.destroy();
     }
     
+    /**
+     * make sure the system name is NOT contained as from 3.2 on
+     * 
+     * @param collection
+     *        (Set<String>) collection to check
+     * @return
+     */
+    private Set<String> removeSystemValues(Set<String> collection)
+    {
+        if (null != collection)
+        {
+            // make sure the system name is NOT contained as from 3.2 on
+            if (collection.contains("system.indexes"))
+            {
+                collection.remove("system.indexes");
+            }
+        }
+        return collection;
+    }
+    
     @Test
     public void basic()
     {
         assertNotNull(db);
         assertNotNull(ffs);
         Set<String> collectionNames = new HashSet<String>();
-        collectionNames.add("system.indexes");
         collectionNames.add("ffs");
-        assertEquals(collectionNames, db.getCollectionNames());
+        assertEquals(collectionNames, removeSystemValues(
+                db.getCollectionNames()));
         
         // Check indexes (includes implicit '_id_' index)
         List<DBObject> indexes = ffs.getIndexInfo();
@@ -120,7 +140,7 @@ public class FileFolderServiceTest
         assertEquals(0, fileFolderService.deleteFolder("home", "/myfolders", true));
     }
     
-    @Test(expected=DuplicateKey.class)
+    @Test(expected=DuplicateKeyException.class)
     public void uniqueId()
     {
         FolderData folderData = new FolderData("A123", "home", "/myfolders/tests", 6L, 17L);
@@ -130,7 +150,7 @@ public class FileFolderServiceTest
         fileFolderService.createNewFolder(folderData2);
     }
     
-    @Test(expected=DuplicateKey.class)
+    @Test(expected=DuplicateKeyException.class)
     public void uniquePath()
     {
         FolderData folderData = new FolderData("A123", "home", "/myfolders/tests", 3L, 17L);

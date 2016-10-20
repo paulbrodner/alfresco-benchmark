@@ -7,12 +7,12 @@
     /**
      * Service layer to interact with Test API.
      */
-    angular.module('benchmark-run', ['ngResource'])
+    var bmRun = angular.module('benchmark-run', ['ngResource']);
 
     /**
      * Test run properties service.
      */
-    .factory('TestRunPropertyService', function($resource) 
+    bmRun.factory('TestRunPropertyService', function($resource) 
     {
         return $resource
         (
@@ -22,8 +22,7 @@
                 propertyname: '@propertyname'
             }, 
             {
-                update: 
-                {
+                'update': {
                     method: 'PUT',
                     params: 
                     {
@@ -32,8 +31,7 @@
                         propertyname: 'propertyname'
                     }
                 }, 
-                delete: 
-                {
+                'delete': {
                     method: 'DELETE',
                     headers: 
                     {
@@ -47,16 +45,18 @@
                 }
             }
         )
-    }).value('version', '0.1')
+    }).value('version', '0.1');
 
+    
     /**
      * Test run service.
      * Get run detail http://localhost:9080/alfresco-benchmark-server/api/v1/tests/Bench_13/runs/run_1
      * Stop run /api/v1/tests/SAMPLE1/runs/RUN01/terminate
      * Copy test run /api/v1/tests/SAMPLE1/runs
      */
-    .factory('TestRunService', function($resource) {
-        return $resource('api/v1/tests/:id/runs/:runname/:param1/:param2', {
+    bmRun.factory('TestRunService', function($resource) {
+    	try{
+    		return $resource('api/v1/tests/:id/runs/:runname/:param1/:param2', {
             id: '@id',
             runname: '@runname',
             filterEventName: '@filterEventName',
@@ -163,8 +163,7 @@
                     param2: 'allEventsFilterName'
                 },
                 isArray: true
-            }
-            ,
+            },
             getEventDetails: {
                 method: 'GET',
                 params: {
@@ -174,38 +173,141 @@
                     param2: 'eventResults'
                 },
                 isArray: true
+            },
+            importProps : {
+            	method: 'POST',
+                params: {
+                    id: 'id',
+                    runname: 'runname',
+                    param1: 'importProps',
+                }
             }
-        })
-    }).value('version', '0.1')
+        });
+    	}catch(err){
+    		alert(err);
+    	}
+    }).value('version', '0.1');
     
     /**
      * Show all logs /api/v1/status/logs
      */
-    .factory('TestShowLogsService', function($resource) {
+    bmRun.factory('TestShowLogsService', function($resource) {
         return $resource('api/v1/status/logs', {}, {
             getAllLogs: {
                 method: 'GET',
+                params: {
+                	driverId: 'driverId',
+                	test: 'test',
+                	run: 'run'
+                },
                 isArray: true
             }
         })
-    }).value('version', '0.1')
+    }).value('version', '0.1');
+    
+        /**
+     * Tests service.
+     */
+    bmRun.factory('TestService', function($resource) {
+        return $resource("api/v1/tests/:id/:param", {
+            id: '@id'
+        }, {
+            //Define methods on the TestService Object
+            getTests: {
+                method: 'GET',
+                isArray: true
+            },
+            getTest: {
+                method: 'GET',
+                params: {
+                    id: 'id'
+                }
+            },
+            saveTest: {
+                method: 'POST'
+            },
+            updateTest: {
+                method: 'PUT'
+            },
+            copyTest: {
+                method: 'POST'
+            },
+            deleteTest: {
+                method: 'DELETE',
+                params: {
+                    id: 'id'
+                }
+            },
+            getDrivers: {
+                method: 'GET',
+                isArray: true,
+                params: {
+                    id: 'id',
+                    param:'drivers'
+                }
+            }
+        })
+    }).value('version', '0.1');
     
     /**
      * List test runs controller
      */
-    .controller('TestRunListCtrl', ['$scope', '$location', '$timeout', 'TestRunService', 'ModalService',
-        function($scope, $location, $timeout, TestRunService, ModalService) {
+    bmRun.controller('TestRunListCtrl', ['$scope', '$location', '$window', '$timeout', 'TestRunService', 'ModalService', 'TestService',
+        function($scope, $location, $window, $timeout, TestRunService, ModalService, TestService) {
             var timer;
             $scope.data = {};
             $scope.data.runs = {};
             var path = $location.path();
             var names = path.replace("/tests/", "").split("/");
             $scope.data.testname = names[0];
+            $scope.drivers = [];
+            $scope.hasError = false;
+            $scope.error = {};
+            $scope.error.msg = "";
+            $scope.file = "";
+            
+            //loads the driver properties
+            $scope.loadDrivers = function(thetestname){
+                TestService.getDrivers({
+                    id: thetestname
+                }, function(response) {
+                    //Strip $ as it prevents value from appearing
+                    var jsonStr = JSON.stringify(response);
+                    jsonStr = jsonStr.replace(/\$/g, '').replace('_id','ID');
+                    $scope.drivers = JSON.parse(jsonStr); 
+                });
+            };
+            
+         // checks if drivers are present
+            $scope.hasDrivers = function(thetestname){
+                if ($scope.drivers){
+                    return $scope.drivers.length > 0;
+                }
+                return false;
+            };
+            
+            // checks if at least one driver is present
+            $scope.checkDriver = function(thetestname){
+                $scope.error.msg = "";
+                $scope.hasError = false;
+                $scope.loadDrivers(thetestname);
+                if($scope.drivers){
+                    if ($scope.drivers.length < 1){
+                        // show HTML error message 
+                        $scope.error.msg = "Unable to start test '" + thetestname + "': there is no driver present";
+                        $scope.hasError = true;
+                        return false;
+                    }
+                }
+                return true;
+            };
             /**
              * Get data gets test run collection from back-end.
              */
             $scope.getData = function() {
-
+                // load initial drivers
+                $scope.loadDrivers($scope.data.testname);
+                
                 TestRunService.getTestRuns({
                     id: $scope.data.testname
                 }, function(response) {
@@ -255,7 +357,71 @@
                 }
             );
 
-            //Call back to delete run
+            // import properties
+            $scope.importProperties = function(runname, testname){
+            	$scope.importPropsData = {
+                        display: true,
+                        title: 'Import run properties: ' + runname,
+                        message: "Select JSON property file to upload",
+                        upload : true,
+                        buttonClose: "Cancel",
+                        buttonOk: "Import",
+                        actionName: "doImportProperties",
+                        actionValue: [runname, testname]
+                    };
+                $scope.modal = ModalService.create($scope.importPropsData);
+            };
+            
+            // callback from modal to store the file content
+            $scope.storeFile = function(file){
+            	$scope.file = file;
+            };
+			
+			// callback from modal to trigger import
+			$scope.doImportProperties = function(runname, testname) {
+				// create transfer to RestAPI
+				var json = {
+						"version" : 0,
+	                    "value": $scope.file.toString()
+	                };
+				TestRunService.importProps({
+                    id: testname,
+                    runname: runname
+                }, json, function(response) {
+                	var result = response;
+                	// if all OK - reload page
+                	if (result.result.toString() == "OK"){
+                		$window.location.reload();
+                	}
+                	else{
+	                	try
+	                	{
+	                		$scope.importWarnErrorData = {
+	                                display: true,
+	                                title: 'Import result',
+	                                message: result.msg,
+	                                upload : false,
+	                                buttonOk: "OK",
+	                                actionName: "doFinishImport",
+	                                actionValue: [runname, testname],
+	                                hideButtonClose : true
+	                            };
+	                		$scope.modal = ModalService.create($scope.importWarnErrorData);
+	                	}
+	                	catch(err){/*alert(err);*/};
+                	}
+                })
+			};
+
+			// finish import on warn or error and navigate to property edit
+			$scope.doFinishImport = function(runname, testname){
+				var url = "#/tests/" + testname + "/" + runname + "/properties";
+				$window.location = url;
+				// final reload to ensure clean forms
+				$window.location.reload();
+			}
+			
+            // Call back to delete run
             $scope.deleteRun = function(runname, testname) {
                 $scope.modal = {
                     display: true,
@@ -265,9 +431,9 @@
                     buttonOk: "Delete",
                     actionName: "doDeleteRun",
                     actionValue: [testname, runname]
-                }
+                };
                 $scope.modal = ModalService.create($scope.modal);
-            }
+            };
 
             //Call back from modal to perform delete.
             $scope.doDeleteRun = function(testname, runname) {
@@ -284,6 +450,11 @@
             };
             //call back to start run
             $scope.startRun = function(testname, index) {
+                // check if driver present
+                if (!$scope.checkDriver(testname)){
+                    return;
+                };
+                
                 var run = $scope.data.runs[index];
                 var version = run.version;
                 var currentdate = new Date();
@@ -313,19 +484,20 @@
             }
         }
 
-    ])
+    ]);
 
     /**
      * Controller to create test run
      */
-    .controller('TestRunCreateCtrl', ['$scope', '$location', '$window', 'TestRunService',
-        function($scope, $location, $window, TestRunService) {
+    bmRun.controller('TestRunCreateCtrl', ['$scope', '$location', '$window', 'TestRunService', 'ValidationService',
+        function($scope, $location, $window, TestRunService, ValidationService) {
             $scope.master = {};
             $scope.testname = {};
             var path = $location.path();
             var names = path.replace("/tests/", "").split("/");
             $scope.testname = names[0];
             $scope.runs = [];
+            $scope.errorMsg = null;
 
             TestRunService.getTestRuns({
                     id: $scope.testname
@@ -343,6 +515,15 @@
                 }
             };
 
+            // validates the test name
+            $scope.validateName = function(testRunName){
+            	try{
+                $scope.errorMsg = ValidationService.isValidTestRunName(testRunName);
+            	}catch(err){
+            		alert(err);
+            	}
+            };
+            
             $scope.createTestRun = function(testrun) {
                 var postData = {
                     "name": testrun.name,
@@ -363,41 +544,45 @@
                             }
                         }
                     },
-                    function error(error) {
+                    function error(errorVal) {
                         $scope.hasError = true;
-                        if (error.status == 500) {
+                        if (errorVal.status == 500) {
                             $scope.errorMsg = "The name already exists, please choose another unique name.";
                         } else {
-                            $scope.errorMsg = error.data.error;
+                            $scope.errorMsg = errorVal.data.error;
                         }
                     });
             }
         }
-    ])
+    ]);
 
     /**
      * Test run property controller
      */
-    .controller('TestRunPropertyCtrl', ['$scope',
+    bmRun.controller('TestRunPropertyCtrl', ['$scope',
         '$location',
         'TestRunService',
         'TestRunPropertyService',
         'UtilService',
+        'ValidationService',
         function($scope,
             $location,
             TestRunService,
             TestRunPropertyService,
-            UtilService) {
+            UtilService,
+            ValidationService) {
             $scope.data = {};
             $scope.master = {};
             var path = $location.path();
             var names = path.replace("/tests/", "").split("/");
             var testname = names[0];
             var runname = names[1];
+            $scope.errMsg = null;
 
             $scope.readOnly = false;
             $scope.data.testname = testname;
             $scope.data.runname = runname;
+            $scope.nameErrorMessage = null;
 
             TestRunService.getTestRun({
                 id: $scope.data.testname,
@@ -424,7 +609,48 @@
             $scope.reset = function() {
                 $scope.data = angular.copy($scope.master);
             }
+            
+            // Validates the name entered by the user
+            $scope.validateRunName = function(){          
+                $scope.nameErrorMessage = ValidationService.isValidTestRunName($scope.data.name);
+            }
 
+            // called for each key press  in the BM name editor:
+            // returns true if to continue edit
+            // returns false if edit is done. 
+            $scope.doKeyPressName = function(event){
+                if (event.keyCode == 13){
+                    // ENTER - allowed only if no validation error message is present
+                    if (null == $scope.nameErrorMessage){
+                        $scope.updateRunName($scope.data.name);
+                        return false;
+                    }
+                }
+                else if (event.keyCode == 27){
+                    // ESC
+                    $scope.reset();
+                    return false;
+                }
+                return true;
+            }
+
+            // called for each key press  in the BM test description editor:
+            // returns true if to continue edit
+            // returns false if edit is done. 
+            $scope.doKeyPressDesc = function(event){
+                if (event.keyCode == 13){
+                    // ENTER
+                    $scope.updateRunDesc($scope.data.description);
+                    return false;
+                }
+                else if (event.keyCode == 27){
+                    // ESC
+                    $scope.reset();
+                    return false;
+                }
+                return true;
+            }
+            
             //-------------- Test run properties CRUD ----------
             //call back for update run
             $scope.updateRunName = function(name) {
@@ -451,16 +677,31 @@
                     "description": description
                 }
                 $scope.updateTestRun(json);
+                // increase version number for there will be no reload of page on update
+                // of the version number ... else next save will fail ...
+                $scope.data.version = $scope.data.version + 1;
             }
-
+            
+            // call Rest API to update the test run
             $scope.updateTestRun = function(data) {
-                TestRunService.updateTestRun({
-                    "id": testname
-                }, data, function(response) {
-                    $scope.runNameEditorEnabled = false;
-                    $scope.runDescEditorEnabled = false;
-                    $location.path("/tests/" + testname + "/" + response.name + "/properties");
-                });
+            	try{
+            		// reset error message first
+            		$scope.errMsg = null;
+            		TestRunService.updateTestRun({
+            			"id": testname
+            			}, 
+            			data, 
+            			function(response) {
+            				$scope.runNameEditorEnabled = false;
+            				$scope.runDescEditorEnabled = false;
+            				$location.path("/tests/" + testname + "/" + response.name + "/properties");
+            			}, // TODO this pattern must be used in every Jersey call ....
+            			function(errResponse){            
+            				$scope.errMsg = "Unable to update the test run!";
+            			});
+            	}catch(err){
+            		$scope.errMsg = err;
+            	}
             };
             // call back for update test property field
             $scope.updateProperty = function(item) {
@@ -521,7 +762,40 @@
                 }
                 return true;
             }
-
+            
+            // validates the property
+            $scope.validate = function(itemProperty){
+                ValidationService.validate(itemProperty);
+            }
+                        
+            // checks whether the property item has a choice collection
+            $scope.hasChoice = function(itemProperty){
+                if (itemProperty.type.toLowerCase() == 'boolean'){
+                    // a boolean value has implicit 'true' and 'false' only ...
+                    return true;
+                }
+                    
+                if (typeof itemProperty.choice != 'undefined'){
+                    if(JSON.parse(itemProperty.choice).length > 0){
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            // returns the choice collection of a property item or null 
+            $scope.getChoiceCollection = function(itemProperty){
+                // check boolean first ...
+                if (itemProperty.type.toLowerCase() == 'boolean'){
+                    var choices= ["true", "false"];
+                    return choices; 
+                }
+                if (typeof itemProperty.choice != 'undefined'){
+                    return JSON.parse(itemProperty.choice);
+                }
+                return null;
+            }
+            
             $scope.updateTestRunProperty = function(testname, runname, propertyName, propData) {
                 TestRunPropertyService.update({
                         "id": testname,
@@ -553,30 +827,35 @@
             $scope.attentionRequired = false;
 
             $scope.attentionReq = function(item) {
-                //for the case when we don't have a value and default '--' one exists
-                if (angular.isUndefined(item.value) && item['default'].indexOf('--') > -1)
-                {
-                    $scope.attentionRequired = true;
-                    $scope.attentionMessage = "* {" + item.group + " / " +item.name + "}: A value must be set.";
+                if (typeof item.value != 'undefined'){
+                    //for the case when we don't have a value and default '--' one exists
+                    if (angular.isUndefined(item.value) && item['default'].indexOf('--') > -1)
+                    {
+                        $scope.attentionRequired = true;
+                        $scope.attentionMessage = "* {" + item.group + " / " +item.name + "}: A value must be set.";
+                        return true;
+                    }
+    
+                    var isAttentionReq = item.value.indexOf('--') > -1;
+                    if (isAttentionReq)
+                    {
+                        $scope.attentionRequired = true;
+                        $scope.attentionMessage = "* {" + item.group + " / " +item.name + "}: A value must be set.";
+                    }
+                    return isAttentionReq;
                 }
-
-                var isAttentionReq = item.value.indexOf('--') > -1;
-                if (isAttentionReq)
-                {
-                    $scope.attentionRequired = true;
-                    $scope.attentionMessage = "* {" + item.group + " / " +item.name + "}: A value must be set.";
-                }
-                return isAttentionReq;
+                return false;
             }
         }
-    ])
+    ]);
 
     /*
      * Run summary controller
      */
-    .controller('TestRunSummaryCtrl', ['$scope', '$location', '$timeout', 'TestRunService', 'TestShowLogsService', 'ModalService',
-        function($scope, $location, $timeout, TestRunService, TestShowLogsService, ModalService) {
+    bmRun.controller('TestRunSummaryCtrl', ['$scope', '$location', '$timeout', 'TestRunService', 'TestShowLogsService', 'ModalService', 'TestService',
+        function($scope, $location, $timeout, TestRunService, TestShowLogsService, ModalService, TestService) {
             var timer;
+            var timerEvents = null;
             var path = $location.path();
             var names = path.replace("/tests/", "").split("/");
             $scope.summary = {};
@@ -584,6 +863,109 @@
             $scope.testname = names[0];
             $scope.runname = names[1];
             $scope.mockData = []; //Implement call to get charts
+            $scope.hasError = false;
+            $scope.errorMsg = "";
+          
+            // stores the driver properties 
+            $scope.drivers = [];            
+            
+         // gets the driver properties
+            $scope.loadDrivers = function(){
+                TestService.getDrivers({
+                            id: $scope.testname
+                        }, function(response) {
+                            //Strip $ as it prevents value from appearing
+                            var jsonStr = JSON.stringify(response);
+                            jsonStr = jsonStr.replace(/\$/g, '').replace('_id','ID');
+                            $scope.drivers = JSON.parse(jsonStr); 
+                        });
+            };
+            
+            // checks if drivers are present
+            $scope.hasDrivers = function(){
+                if ($scope.drivers){
+                    return $scope.drivers.length > 0;
+                }
+                return false;
+            };
+            
+            // checks if drivers are present and notifies if not. 
+            $scope.checkDrivers = function(){
+                $scope.hasError = false;
+                $scope.loadDrivers();
+                if ($scope.drivers.length < 1){
+                    // show HTML error message
+                    $scope.hasError = true;
+                    $scope.errorMsg = "No driver present, unable to start test run '" + $scope.testname + "." + $scope.runname;
+                    return false;
+                }
+                return true;
+            };
+            
+            // TODO
+         // import properties
+            $scope.importProperties = function(runname, testname){
+            	$scope.importPropsData = {
+                        display: true,
+                        title: 'Import run properties: ' + runname,
+                        message: "Select JSON property file to upload",
+                        upload : true,
+                        buttonClose: "Cancel",
+                        buttonOk: "Import",
+                        actionName: "doImportProperties",
+                        actionValue: [runname, testname]
+                    };
+                $scope.modal = ModalService.create($scope.importPropsData);
+            };
+            
+            // callback from modal to store the file content
+            $scope.storeFile = function(file){
+            	$scope.file = file;
+            };
+			
+			// callback from modal to trigger import
+			$scope.doImportProperties = function(runname, testname) {
+				// create transfer to RestAPI
+				var json = {
+						"version" : 0,
+	                    "value": $scope.file.toString()
+	                };
+				TestRunService.importProps({
+                    id: testname,
+                    runname: runname
+                }, json, function(response) {
+                	var result = response;
+                	// if all OK - reload page
+                	if (result.result.toString() == "OK"){
+                		$window.location.reload();
+                	}
+                	else{
+	                	try
+	                	{
+	                		$scope.importWarnErrorData = {
+	                                display: true,
+	                                title: 'Import result',
+	                                message: result.msg,
+	                                upload : false,
+	                                buttonOk: "OK",
+	                                actionName: "doFinishImport",
+	                                actionValue: [runname, testname],
+	                                hideButtonClose : true
+	                            };
+	                		$scope.modal = ModalService.create($scope.importWarnErrorData);
+	                	}
+	                	catch(err){/*alert(err);*/};
+                	}
+                })
+			};
+
+			// finish import on warn or error and navigate to property edit
+			$scope.doFinishImport = function(runname, testname){
+				var url = "#/tests/" + testname + "/" + runname + "/properties";
+				$window.location = url;
+				// final reload to ensure clean forms
+				$window.location.reload();
+			}            
             
             $scope.getSummary = function() {
                 //initial chart display.
@@ -629,7 +1011,9 @@
             };
             //call back to start run
             $scope.startRun = function() {
-
+                if (!$scope.checkDrivers()){
+                    return;
+                }          
                 var version = $scope.summary.version;
                 var currentdate = new Date();
                 var time = currentdate.valueOf();
@@ -656,9 +1040,13 @@
             }
             
             $scope.errorLogs = 0;
-            // get test logs only 
+            // get test logs only - 2016-01-29 fkb: match at least test and run
             $scope.getTestLogs = function() {
-            	TestShowLogsService.getAllLogs(function(response) {
+            	TestShowLogsService.getAllLogs({
+                    driverId: null,
+                    test: $scope.testname,
+                    run: $scope.runname
+                }, function(response) {
                     var logs = [];
                     $scope.errorLogs = 0;
                     for (var i = 0; i < response.length; i++) {
@@ -716,6 +1104,43 @@
             // possible number of events to retrieve
             $scope.numEventValues = [5, 10, 15, 20, 25, 50, 100];
             
+            // selected auto refresh
+            $scope.autoRefresh = "off";
+            
+            // values for auto-refresh
+            $scope.autoRefreshValues = ["off", "3 sec", "5 sec", "10sec", "15 sec", "30 sec", "60 sec", "90 sec"];
+            
+            // update auto-refresh of events
+            $scope.selectRefresh = function(value){
+                $scope.autoRefresh=value;
+                var time = parseInt(value);
+                if (time > 0){
+                    time = time * 1000;
+                    $scope.doAutoRefresh(time);
+                }
+                else{
+                    // cancel timer
+                    if (null != timerEvents){
+                        $timeout.cancel(timerEvents);
+                        timerEvents = null;
+                    }
+                }
+            } 
+            
+            // auto refreh events
+            $scope.doAutoRefresh=function(time){
+                if (null != timerEvents){
+                    $timeout.cancel(timerEvents);
+                    timerEvents = null;
+                }
+                
+                timerEvents = $timeout(function() {
+                	$scope.getEventNames(); // update names for there may be new ones
+                    $scope.getEvents();
+                    $scope.doAutoRefresh(time);
+                }, time);
+            }
+            
             // selects number of events and updates 
             $scope.selectNumEvents = function(num){
                 $scope.numEvents = num;
@@ -750,7 +1175,7 @@
             
             // filter by event names 
             $scope.eventNames = [];
-            $scope.selectedEventName = "(All Events)";
+            $scope.selectedEventName = null;
             $scope.selectEventName = function(eventName){
                 $scope.selectedEventName = eventName;
                 $scope.getEvents();
@@ -771,14 +1196,16 @@
                     $scope.eventNames = evn;
                     
                     // inital set the (All Events) text
-                    TestRunService.getAllEventsFilterName({
-                        id: $scope.testname,
-                        runname: $scope.runname
-                    }, function(response) {
-                        if (response.length == 1){
-                            $scope.selectedEventName = response[0];
-                        }
-                    });
+                    if ($scope.selectedEventName == null){
+	                    TestRunService.getAllEventsFilterName({
+	                        id: $scope.testname,
+	                        runname: $scope.runname
+	                    }, function(response) {
+	                        if (response.length == 1){
+	                            $scope.selectedEventName = response[0];
+	                        }
+	                    });
+                    }
                 });
             };
             
@@ -820,6 +1247,9 @@
             //Get the summary now!
             $scope.getSummary();
             
+            // initial load drivers
+            $scope.loadDrivers();
+            
             //Refresh data every 2.5 seconds.
             $scope.summaryPoll = function() {
                 timer = $timeout(function() {
@@ -836,16 +1266,20 @@
                 "$destroy",
                 function(event) {
                     $timeout.cancel(timer);
+                    if (null != timerEvents){
+                        $timeout.cancel(timerEvents);
+                        timerEvents = null;
+                    }
                 }
             );
         }
-    ])
+    ]);
     
     /*
      * Copy test form controller
      */
-    .controller('TestRunCopyCtrl', ['$scope', '$location', 'TestRunService',
-        function($scope, $location, TestRunService) {
+    bmRun.controller('TestRunCopyCtrl', ['$scope', '$location', 'TestRunService', 'ValidationService',
+        function($scope, $location, TestRunService, ValidationService) {
             $scope.testname = $location.path().split('/')[2];
             $scope.runname = $location.path().split('/')[3];
             TestRunService.getTestRun({
@@ -855,6 +1289,12 @@
                 $scope.data = response;
             });
             $scope.master = {};
+            $scope.errorMsg = null;
+            
+            // validates the test run name
+            $scope.validateName = function(testRunName){
+                $scope.errorMsg = ValidationService.isValidTestRunName(testRunName);
+            };
 
             $scope.update = function(test) {
                 $scope.master = angular.copy(test);
@@ -892,12 +1332,12 @@
                         $scope.response = res;
                         $location.path("/tests/" + $scope.testname);
                     },
-                    function error(error) {
+                    function error(errorVal) {
                         $scope.hasError = true;
-                        if (error.status == 500) {
+                        if (errorVal.status == 500) {
                             $scope.errorMsg = "The name already exists, please choose another unique name.";
                         } else {
-                            $scope.errorMsg = error.data.error;
+                            $scope.errorMsg = errorVal.data.error;
                         }
                     });
             };

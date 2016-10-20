@@ -61,7 +61,27 @@ public class LogServiceTest
         logService.start();
         ls = db.getCollection(MongoLogService.COLLECTION_LOGS);
     }
-    
+
+    /**
+     * make sure the system name is NOT contained as from 3.2 on
+     * 
+     * @param collection
+     *        (Set<String>) collection to check
+     * @return
+     */
+    private Set<String> removeSystemValues(Set<String> collection)
+    {
+        if (null != collection)
+        {
+            // make sure the system name is NOT contained as from 3.2 on
+            if (collection.contains("system.indexes"))
+            {
+                collection.remove("system.indexes");
+            }
+        }
+        return collection;
+    }
+
     @After
     public void tearDown() throws Exception
     {
@@ -75,10 +95,10 @@ public class LogServiceTest
         assertNotNull(db);
         assertNotNull(ls);
         Set<String> collectionNames = new HashSet<String>();
-        collectionNames.add("system.indexes");
         collectionNames.add(MongoLogService.COLLECTION_LOGS);
-        assertEquals(collectionNames, db.getCollectionNames());
-        
+        assertEquals(collectionNames, removeSystemValues(
+                db.getCollectionNames()));
+
         // Check indexes (includes implicit '_id_' index)
         List<DBObject> indexes = ls.getIndexInfo();
         assertEquals("Incorrect indexes: " + indexes, 5, indexes.size());
